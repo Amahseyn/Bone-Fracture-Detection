@@ -12,8 +12,8 @@ from torchvision.models.detection.faster_rcnn import FastRCNNPredictor
 
 torch.cuda.empty_cache()
 
-BS = 16
-LR = 0.00005
+BS = 2
+LR = 0.0005
 epochs = 20
 IS = 256
 D = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -39,10 +39,12 @@ def unconvert(width, height, x, y, w, h):
     ymin = int((y*height) - (h * height)/2.0)
     return xmin, ymin, xmax, ymax
 
+# Define augmentation
 augs = A.Compose([
     A.Resize(IS, IS),
 ], bbox_params=A.BboxParams(format='pascal_voc', label_fields=['class_labels']), is_check_shapes=True)
 
+# Define dataset class
 class FractureData(torch.utils.data.Dataset):
     
     def __init__(self, dir_path, img_paths, target_paths, augs=None):
@@ -92,22 +94,23 @@ class FractureData(torch.utils.data.Dataset):
         annot = {'boxes': bbox, 'labels': label}
         
         return image, annot
-    
-    def collate_fn(self, batch):
-        return tuple(zip(*batch))
 
+# Function to collate data in DataLoader
+def collate_fn(batch):
+    return tuple(zip(*batch))
+
+# DataLoader for training and validation sets
 trainset = FractureData(train_dir_path, train_img_paths, train_target_paths, augs)
 valset = FractureData(val_dir_path, val_img_paths, val_target_paths, augs)
 
-trainloader = torch.utils.data.DataLoader(trainset, batch_size=BS, collate_fn=trainset.collate_fn)
-valloader = torch.utils.data.DataLoader(valset, batch_size=BS, collate_fn=valset.collate_fn)
+trainloader = torch.utils.data.DataLoader(trainset, batch_size=BS, collate_fn=collate_fn)
+valloader = torch.utils.data.DataLoader(valset, batch_size=BS, collate_fn=collate_fn)
 
 print(f'Training Data: {len(trainset)} images divided into {len(trainloader)} batches')
 print(f'Validation Data: {len(valset)} images divided into {len(valloader)} batches')
 
+# Function to compute Intersection over Union (IoU)
 def compute_iou(pred_box, true_box):
-    # Compute Intersection over Union (IoU) between two bounding boxes
-    # You can replace this with your own IoU calculation
     x1 = max(pred_box[0], true_box[0])
     y1 = max(pred_box[1], true_box[1])
     x2 = min(pred_box[2], true_box[2])
@@ -121,6 +124,7 @@ def compute_iou(pred_box, true_box):
     iou = intersection / union if union > 0 else 0
     return iou
 
+# Function to calculate accuracy
 def calculate_accuracy(model, dataloader):
     model.eval()
     correct = 0
@@ -136,6 +140,9 @@ def calculate_accuracy(model, dataloader):
             for output, target in zip(outputs, targets):
                 pred_boxes = output['boxes'].cpu().numpy()
                 true_boxes = target['boxes'].cpu().numpy()
+
+                if len(pred_boxes) == 0 or len(true_boxes) == 0:
+                    continue
                 
                 for pred_box, true_box in zip(pred_boxes, true_boxes):
                     iou = compute_iou(pred_box, true_box)
@@ -146,6 +153,7 @@ def calculate_accuracy(model, dataloader):
     accuracy = correct / total if total > 0 else 0
     return accuracy
 
+# Model setup
 model = torchvision.models.detection.fasterrcnn_resnet50_fpn(pretrained=True, progress=False)
 in_features = model.roi_heads.box_predictor.cls_score.in_features
 model.roi_heads.box_predictor = FastRCNNPredictor(in_features, num_classes)
@@ -159,7 +167,7 @@ for epoch in range(epochs):
     model.train()
     train_loss = 0.0
     
-    for images, targets in tqdm(trainloader):
+    for (i,(images, targets)) in enumerate(trainloader):
         images = [image.to(D) for image in images]
         targets = [{k: v.to(D) for k, v in t.items()} for t in targets]
 
@@ -170,22 +178,20 @@ for epoch in range(epochs):
         loss.backward()
         opt.step()
 
-        train_loss += loss.item()
+        train_loss += loss
 
     train_accuracy = calculate_accuracy(model, trainloader)
     print(f"Epoch {epoch + 1}/{epochs}: Train Loss: {train_loss / len(trainloader)}, Train Accuracy: {train_accuracy}")
 
-    model.eval()
+    model.train()
     val_loss = 0.0
     
     for images, targets in tqdm(valloader):
         images = [image.to(D) for image in images]
         targets = [{k: v.to(D) for k, v in t.items()} for t in targets]
-
-        with torch.no_grad():
-            loss_dict = model(images, targets)
-            loss = sum(loss for loss in loss_dict.values())
-            val_loss += loss.item()
+        loss_dict=model(images,targets)
+        loss = sum(loss for loss in loss_dict.values())
+        val_loss += loss
 
     val_accuracy = calculate_accuracy(model, valloader)
     print(f"Epoch {epoch + 1}/{epochs}: Validation Loss: {val_loss / len(valloader)}, Validation Accuracy: {val_accuracy}")
