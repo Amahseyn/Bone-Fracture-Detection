@@ -58,21 +58,26 @@ classes = ['elbow positive', 'fingers positive', 'forearm fracture', 'humerus fr
 input_shape = (height, width, 3)
 input_layer = tf.keras.layers.Input(input_shape)
 
-base_layers = layers.experimental.preprocessing.Rescaling(1./255, name='bl_1')(input_layer)
+base_layers = layers.experimental.preprocessing.Rescaling(1./255)(input_layer)
 base_layers = layers.Conv2D(16, 3, padding='same', activation='relu', name='bl_2')(base_layers)
-base_layers = layers.MaxPooling2D(name='bl_3')(base_layers)
+base_layers = layers.MaxPooling2D()(base_layers)
 base_layers = layers.Conv2D(32, 3, padding='same', activation='relu', name='bl_4')(base_layers)
-base_layers = layers.MaxPooling2D(name='bl_5')(base_layers)
+base_layers = layers.MaxPooling2D()(base_layers)
 base_layers = layers.Conv2D(64, 3, padding='same', activation='relu', name='bl_6')(base_layers)
-base_layers = layers.MaxPooling2D(name='bl_7')(base_layers)
-base_layers = layers.Flatten(name='bl_8')(base_layers)
-
-classifier_branch = layers.Dense(128, activation='relu', name='cl_1')(base_layers)
+base_layers = layers.MaxPooling2D()(base_layers)
+#create the classifier branch
+flatten = layers.Flatten(name='bl_8')(base_layers)
+classifier_branch = layers.Dense(128, activation='relu')(flatten)
 classifier_branch = layers.Dense(num_classes, name='cl_head')(classifier_branch)  
-
-locator_branch = layers.Dense(256, activation='relu', name='bb_1')(base_layers)
-locator_branch = layers.Dense(128, activation='relu', name='bb_2')(locator_branch)
-locator_branch = layers.Dense(64, activation='relu', name='bb_3')(locator_branch)
+#create the localiser branch
+locator_branch = layers.Conv2D(128, 3, padding='same', activation='relu')(base_layers)
+locator_branch = layers.MaxPooling2D()(locator_branch)
+locator_branch = layers.Conv2D(256, 3, padding='same', activation='relu')(locator_branch)
+locator_branch = layers.MaxPooling2D()(locator_branch)
+locator_branch = layers.Flatten()(locator_branch)
+locator_branch = layers.Dense(256, activation='relu')(locator_branch)
+locator_branch = layers.Dense(128, activation='relu')(locator_branch)
+locator_branch = layers.Dense(64, activation='relu')(locator_branch)
 locator_branch = layers.Dense(4, activation='sigmoid', name='bb_head')(locator_branch)
 model = tf.keras.Model(input_layer,outputs=[classifier_branch,locator_branch])
 
